@@ -3,7 +3,7 @@
  * Plugin Name:       Protect Uploads
  * Plugin URI:        https://wordpress.org/support/plugin/protect-uploads/
  * Description:       Protect your uploads directory. Avoid browsing of your uploads directory by adding a htaccess file or an index.php file.
- * Version:           0.5.2
+ * Version:           0.6.0
  * Author:            alticreation
  * License:           GPL-2.0+
  * License URI:       http://www.gnu.org/licenses/gpl-2.0.txt
@@ -16,7 +16,7 @@ if ( ! defined( 'WPINC' ) ) {
 	die;
 }
 
-function activate_alti_protect_uploads() {
+function protect_uploads_activate() {
 
 	require_once plugin_dir_path( __FILE__ ) . 'includes/class-protect-uploads.php';
 	require_once plugin_dir_path( __FILE__ ) . 'includes/class-protect-uploads-activator.php';
@@ -25,7 +25,7 @@ function activate_alti_protect_uploads() {
 
 }
 
-function deactivate_alti_protect_uploads() {
+function protect_uploads_deactivate() {
 
 	require_once plugin_dir_path( __FILE__ ) . 'admin/class-protect-uploads-admin.php';
 	require_once plugin_dir_path( __FILE__ ) . 'includes/class-protect-uploads-deactivator.php';
@@ -34,8 +34,8 @@ function deactivate_alti_protect_uploads() {
 
 }
 
-register_activation_hook( __FILE__, 'activate_alti_protect_uploads' );
-register_deactivation_hook( __FILE__, 'deactivate_alti_protect_uploads' );
+register_activation_hook( __FILE__, 'protect_uploads_activate' );
+register_deactivation_hook( __FILE__, 'protect_uploads_deactivate' );
 
 require plugin_dir_path( __FILE__ ) . 'includes/class-protect-uploads.php';
 

@@ -1,14 +1,16 @@
-=== Protect uploads ===
+=== Protect Uploads ===
 Contributors: alticreation
-Tags: uploads, protection, images protection, browsing images, uploads folder, image folder, avoid browsing folder, hide uploads, prevent uploads browsing, prevent images browsing, protect library, library
+Tags: uploads, protection, security, watermark, password protection
 Requires at least: 3.0.1
-Tested up to: 6.0.1
+Tested up to: 6.9
 Requires PHP: 7.0
-Stable tag: 0.5.2
+Stable tag: 0.6.0
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
-Protect your uploads directory from people who want to browse it. Avoid browsing of your uploads directory by adding a htaccess or index.php file.
+Protect your uploads directory. Prevent browsing, add watermarks, disable right-click, and password-protect files.
+
+For more information, visit [protectuploads.com](https://protectuploads.com).
 
 == Description ==
 
@@ -16,7 +18,14 @@ The uploads directory is where the files of the WordPress library are stored. Un
 
 * Depending on your server setting, the htaccess option could be disabled.
 
-Available languages :
+**New Features in Version 0.6.0:**
+
+* **Image Watermarking**: Add text watermarks to your uploaded images with customizable position, opacity, and font size.
+* **Right-Click Protection**: Prevent users from right-clicking to download or save your images.
+* **Password Protection**: Secure individual media files with passwords. Multiple passwords can be set for each file with custom labels.
+* **Access Logging**: Track who accesses your password-protected files with detailed logs including IP address and user agent.
+
+Available languages:
 
 * English
 * Français
@@ -27,29 +36,61 @@ Available languages :
 
 1. Upload `protect-uploads` folder to the `/wp-content/plugins/` directory
 2. Activate the plugin through the 'Plugins' menu in WordPress
+3. Configure protection options in Settings → Media → Protect Uploads
 
-Note : GD library is needed and being able to create a .htaccess file in uploads directory.
+Note: GD library is needed for watermarking functionality and being able to create a .htaccess file in uploads directory.
 
 == Frequently Asked Questions ==
+
+= How do I add a password to a media file? =
+
+1. Enable password protection in Settings → Media → Protect Uploads
+2. Edit any media file in your Media Library
+3. Scroll down to the "Password Protection" section
+4. Add one or more passwords with descriptive labels
+
+= How does watermarking work? =
+
+When enabled, watermarking automatically adds text to images when they are uploaded. You can customize:
+- The watermark text (defaults to your site name)
+- Position (top-left, top-right, bottom-left, bottom-right, center)
+- Opacity (0-100%)
+- Font size (small, medium, large)
+
+= Can I password protect only certain file types? =
+
+Yes, password protection works for all media file types including PDFs, images, videos, and documents.
 
 == Screenshots ==
 
 1. Administration Page for the plugin.
+2. Password protection settings for individual media files.
+3. Watermarking options in the settings page.
 
 == Upgrade Notice ==
 
-Nothing for now
+= 0.6.0 =
+Major update with new security features: watermarking, right-click protection, and password protection for individual media files.
 
 == Changelog ==
 
-= 0.1 =
-* Initial release
+= 0.6.0 =
+* Added image watermarking with customizable text, position, opacity, and font size
+* Added right-click protection to prevent image downloads
+* Added password protection for individual media files
+* Added access logging for password-protected files
+* Added multiple password support with custom labels
+* Added security enhancements throughout the plugin
+* Improved file serving with better security checks
+* Added font size control for watermarks
+* Enhanced error handling and logging
 
-= 0.2 =
-* Add security check to form in admin page.
-* Add sidebar for admin page
-* Add Italian translation (thanks to Marko97).
-* Try to fix the wrong message saying that Protection is disabled eventhough it is actually working.
+= 0.5.2 =
+* Removed unused css
+
+= 0.4 =
+* Fix potential security issues.
+* Remove recursive loop that creates indexes.
 
 = 0.3 =
 * Simplify UI admin.
@@ -58,9 +99,11 @@ Nothing for now
 * Reorganizing code and making it more modular and simple.
 * Remove useless pieces.
 
-= 0.4 =
-* Fix potential security issues.
-* Remove recursive loop that creates indexes.
+= 0.2 =
+* Add security check to form in admin page.
+* Add sidebar for admin page
+* Add Italian translation (thanks to Marko97).
+* Try to fix the wrong message saying that Protection is disabled eventhough it is actually working.
 
-= 0.5.2 =
-* Removed unused css
+= 0.1 =
+* Initial release
