@@ -10,7 +10,7 @@ class Alti_ProtectUploads
 	 * @access   protected
 	 * @var      string    $version    The current version of the plugin.
 	 */
-	protected $version = '0.6.0';
+	protected $version = '0.7.0';
 	protected $plugin_name;
 	protected $loader;
 	protected $settings;
@@ -34,6 +34,8 @@ class Alti_ProtectUploads
 		require_once plugin_dir_path( dirname( __FILE__ ) ) . 'includes/class-protect-uploads-image.php';
 		require_once plugin_dir_path( dirname( __FILE__ ) ) . 'includes/class-protect-uploads-passwords.php';
 		require_once plugin_dir_path( dirname( __FILE__ ) ) . 'includes/class-protect-uploads-frontend.php';
+		require_once plugin_dir_path( dirname( __FILE__ ) ) . 'includes/class-protect-uploads-site-health.php';
+		require_once plugin_dir_path( dirname( __FILE__ ) ) . 'includes/class-protect-uploads-upsell.php';
 
 		$this->loader = new Alti_ProtectUploads_Loader();
 	}
@@ -47,7 +49,9 @@ class Alti_ProtectUploads
 		$plugin_i18n = new Alti_ProtectUploads_i18n();
 		$plugin_i18n->set_domain($this->get_plugin_name());
 
-		$this->loader->add_action('plugins_loaded', $plugin_i18n, 'load_plugin_textdomain');
+		// Load on init: loading on plugins_loaded triggers _load_textdomain_just_in_time
+		// notices since WP 6.7.
+		$this->loader->add_action('init', $plugin_i18n, 'load_plugin_textdomain');
 	}
 
 	/**
@@ -65,12 +69,22 @@ class Alti_ProtectUploads
 		$this->loader->add_filter( 'plugin_action_links_' . plugin_basename( plugin_dir_path( dirname( __FILE__ ) ) . $this->plugin_name . '.php' ), $plugin_admin, 'add_settings_link' );
 		$this->loader->add_action( 'admin_enqueue_scripts', $plugin_admin, 'enqueue_styles' );
 
+		// Pro upgrade hints (upsell). Registers nothing when Pro is present.
+		$upsell = new Alti_ProtectUploads_Upsell( $this->get_plugin_name(), $this->get_version() );
+		$upsell->init();
+		$plugin_admin->set_upsell( $upsell );
+		$this->loader->add_filter( 'plugin_action_links_' . plugin_basename( plugin_dir_path( dirname( __FILE__ ) ) . $this->plugin_name . '.php' ), $upsell, 'add_plugins_row_link' );
+
 		// Initialize password protection in admin
 		if ( ! empty( $this->settings['enable_password_protection'] ) ) {
 			$passwords = new Alti_ProtectUploads_Passwords();
 			$passwords->init();
 			$this->loader->add_action( 'admin_enqueue_scripts', $this, 'enqueue_password_scripts' );
 		}
+
+		// Register Site Health protection checks (admin + admin-ajax for async tests).
+		$site_health = new Alti_ProtectUploads_Site_Health();
+		$site_health->init();
 	}
 
 	private function define_public_hooks() {

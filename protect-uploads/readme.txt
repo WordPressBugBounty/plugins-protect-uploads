@@ -1,10 +1,10 @@
 === Protect Uploads ===
 Contributors: alticreation
 Tags: uploads, protection, security, watermark, password protection
-Requires at least: 3.0.1
-Tested up to: 6.9
-Requires PHP: 7.0
-Stable tag: 0.6.0
+Requires at least: 5.0
+Tested up to: 7.0
+Requires PHP: 7.4
+Stable tag: 0.7.0
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -69,10 +69,20 @@ Yes, password protection works for all media file types including PDFs, images, 
 
 == Upgrade Notice ==
 
+= 0.7.0 =
+Adds Site Health checks for uploads protection and updates compatibility for WordPress 7.0.
+
 = 0.6.0 =
 Major update with new security features: watermarking, right-click protection, and password protection for individual media files.
 
 == Changelog ==
+
+= 0.7.0 =
+* Added Site Health checks: uploads directory browsing protection status, detected server configuration (Apache/Nginx), and a bounded scan for sensitive file types in the uploads directory
+* Added unobtrusive upgrade hints for Protect Uploads Pro (hidden entirely when Pro is active)
+* Fixed the settings page title showing the plugin slug instead of the plugin name
+* Compatibility verified with WordPress 7.0 and PHP 8.3
+* Raised minimum requirements to WordPress 5.0 and PHP 7.4
 
 = 0.6.0 =
 * Added image watermarking with customizable text, position, opacity, and font size

@@ -35,6 +35,10 @@ class Alti_ProtectUploads_Uninstall {
 	public static function run() {
 		$plugin_name = 'protect-uploads';
 		if( is_admin()) delete_option( $plugin_name . '-protection' );
+
+		// Upgrade-hint dismissal flags (added in 0.7.0).
+		delete_option( 'protect_uploads_upsell_notice_dismissed' );
+		delete_metadata( 'user', 0, 'protect_uploads_upsell_banner_dismissed', '', true );
 	}
 
 	

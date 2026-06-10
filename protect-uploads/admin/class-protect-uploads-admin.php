@@ -8,6 +8,14 @@ class Alti_ProtectUploads_Admin
 	private $messages = array();
 	private $settings = array();
 
+	/**
+	 * Pro upgrade-hints (upsell) helper.
+	 *
+	 * @since 0.7.0
+	 * @var   Alti_ProtectUploads_Upsell|null
+	 */
+	private $upsell = null;
+
 	public function __construct($plugin_name, $version)
 	{
 		$this->plugin_name = $plugin_name;
@@ -43,9 +51,43 @@ class Alti_ProtectUploads_Admin
 		return $this->plugin_name;
 	}
 
+	/**
+	 * Inject the Pro upgrade-hints (upsell) helper.
+	 *
+	 * @since 0.7.0
+	 * @param Alti_ProtectUploads_Upsell $upsell The upsell helper instance.
+	 * @return void
+	 */
+	public function set_upsell( $upsell )
+	{
+		$this->upsell = $upsell;
+	}
+
+	/**
+	 * Render an upsell surface if the helper is available.
+	 *
+	 * Thin wrapper so the settings renderer stays minimal and safe when the
+	 * helper is absent (e.g. when Pro is present and no helper was injected).
+	 *
+	 * @since 0.7.0
+	 * @param string $method The upsell method to call.
+	 * @param mixed  $arg    Optional argument passed to the method.
+	 * @return void
+	 */
+	private function render_upsell( $method, $arg = null )
+	{
+		if ( $this->upsell && method_exists( $this->upsell, $method ) ) {
+			if ( null === $arg ) {
+				$this->upsell->$method();
+			} else {
+				$this->upsell->$method( $arg );
+			}
+		}
+	}
+
 	public function add_submenu_page()
 	{
-		add_submenu_page('upload.php', $this->plugin_name, 'Protect Uploads <span class="dashicons dashicons-shield-alt" style="font-size:15px;"></span>', 'manage_options', $this->plugin_name . '-settings-page', array($this, 'render_settings_page'));
+		add_submenu_page('upload.php', __( 'Protect Uploads', 'protect-uploads' ), 'Protect Uploads <span class="dashicons dashicons-shield-alt" style="font-size:15px;"></span>', 'manage_options', $this->plugin_name . '-settings-page', array($this, 'render_settings_page'));
 	}
 
 	public function render_settings_page()
@@ -57,7 +99,9 @@ class Alti_ProtectUploads_Admin
 <div class="wrap <?php echo esc_attr( $this->plugin_name ); ?>">
 	<?php echo wp_kses_post( $this->display_messages() ); ?>
 	<h1><?php echo esc_html(get_admin_page_title()); ?></h1>
-	
+
+	<?php $this->render_upsell( 'render_settings_banner' ); ?>
+
 	<h2 class="nav-tab-wrapper">
 		<a href="?page=<?php echo esc_attr($this->plugin_name); ?>-settings-page&tab=directory-protection" class="nav-tab <?php echo $active_tab === 'directory-protection' ? 'nav-tab-active' : ''; ?>">
 			<?php esc_html_e('Directory Protection', 'protect-uploads'); ?>
@@ -154,6 +198,7 @@ class Alti_ProtectUploads_Admin
 						<p class="description">
 							<?php esc_html_e('This table shows protection status for your uploads directory and subdirectories.', 'protect-uploads'); ?>
 						</p>
+						<?php $this->render_upsell( 'render_inline_hint', 'protection' ); ?>
 					</td>
 				</tr>
 			</table>
@@ -172,6 +217,7 @@ class Alti_ProtectUploads_Admin
 								<?php esc_html_e('Enable password protection for media files', 'protect-uploads'); ?>
 							</label>
 							<p class="description"><?php esc_html_e('Allow setting passwords for individual media files', 'protect-uploads'); ?></p>
+							<?php $this->render_upsell( 'render_inline_hint', 'passwords' ); ?>
 						</fieldset>
 					</td>
 				</tr>
@@ -185,6 +231,7 @@ class Alti_ProtectUploads_Admin
 								<?php esc_html_e('Enable watermark on uploaded images', 'protect-uploads'); ?>
 							</label>
 							<p class="description"><?php esc_html_e('Automatically add watermark to new image uploads', 'protect-uploads'); ?></p>
+							<?php $this->render_upsell( 'render_inline_hint', 'watermark' ); ?>
 						</fieldset>
 					</td>
 				</tr>
@@ -243,6 +290,8 @@ class Alti_ProtectUploads_Admin
 
 		<?php submit_button(__('Save Changes', 'protect-uploads')); ?>
 	</form>
+
+	<?php $this->render_upsell( 'render_settings_footer_link' ); ?>
 </div>
 		<?php
 	}
