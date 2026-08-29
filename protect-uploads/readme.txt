@@ -2,9 +2,9 @@
 Contributors: alticreation
 Tags: uploads, protection, security, watermark, password protection
 Requires at least: 5.0
-Tested up to: 7.0
+Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 0.7.0
+Stable tag: 0.7.1
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -18,12 +18,21 @@ The uploads directory is where the files of the WordPress library are stored. Un
 
 * Depending on your server setting, the htaccess option could be disabled.
 
-**New Features in Version 0.6.0:**
+**New in Version 0.7.0:**
 
+* **Site Health checks**: See at a glance — under Tools → Site Health — whether your uploads directory is protected from browsing, what server you are running, and whether any risky file types are sitting in your uploads folder.
+* **WordPress 7.0 ready**: Fully tested on WordPress 7.0 and PHP 8.3.
+
+**All features:**
+
+* **Directory Protection**: Stop visitors from browsing your uploads directory (index.php or .htaccess 403).
 * **Image Watermarking**: Add text watermarks to your uploaded images with customizable position, opacity, and font size.
 * **Right-Click Protection**: Prevent users from right-clicking to download or save your images.
 * **Password Protection**: Secure individual media files with passwords. Multiple passwords can be set for each file with custom labels.
 * **Access Logging**: Track who accesses your password-protected files with detailed logs including IP address and user agent.
+* **Site Health Checks**: Built-in protection status tests with actionable advice.
+
+Need more protection? [Protect Uploads Pro](https://protectuploads.com) adds image watermarks with bulk operations, expiring download links, role-based access with server-level enforcement, hotlink protection, download analytics, and a Protected Download block.
 
 Available languages:
 
@@ -76,6 +85,10 @@ Adds Site Health checks for uploads protection and updates compatibility for Wor
 Major update with new security features: watermarking, right-click protection, and password protection for individual media files.
 
 == Changelog ==
+
+= 0.7.1 =
+* Compatibility verified with WordPress 7.1
+* Fixed the bundled watermark font: text watermarks now render at the intended size using Open Sans instead of falling back to a small built-in bitmap font
 
 = 0.7.0 =
 * Added Site Health checks: uploads directory browsing protection status, detected server configuration (Apache/Nginx), and a bounded scan for sensitive file types in the uploads directory

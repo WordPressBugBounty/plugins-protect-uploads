@@ -3,7 +3,7 @@
  * Plugin Name:       Protect Uploads
  * Plugin URI:        https://wordpress.org/support/plugin/protect-uploads/
  * Description:       Protect your uploads directory. Avoid browsing of your uploads directory by adding a htaccess file or an index.php file.
- * Version:           0.7.0
+ * Version:           0.7.1
  * Requires at least: 5.0
  * Requires PHP:      7.4
  * Author:            alticreation

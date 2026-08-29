@@ -10,7 +10,7 @@ class Alti_ProtectUploads
 	 * @access   protected
 	 * @var      string    $version    The current version of the plugin.
 	 */
-	protected $version = '0.7.0';
+	protected $version = '0.7.1';
 	protected $plugin_name;
 	protected $loader;
 	protected $settings;
