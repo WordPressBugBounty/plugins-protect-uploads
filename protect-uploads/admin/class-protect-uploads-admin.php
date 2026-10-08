@@ -16,6 +16,30 @@ class Alti_ProtectUploads_Admin
 	 */
 	private $upsell = null;
 
+	/**
+	 * Transient caching the uploads-root loopback check.
+	 *
+	 * @since 0.8.0
+	 * @var   string
+	 */
+	const ROOT_STATUS_TRANSIENT = 'protect_uploads_root_status';
+
+	/**
+	 * Per-user transient prefix holding messages across the post-save redirect.
+	 *
+	 * @since 0.8.0
+	 * @var   string
+	 */
+	const MESSAGES_TRANSIENT = 'protect_uploads_messages_';
+
+	/**
+	 * Uploads-root response code checked during this request.
+	 *
+	 * @since 0.8.0
+	 * @var   int|null
+	 */
+	private $root_response_code = null;
+
 	public function __construct($plugin_name, $version)
 	{
 		$this->plugin_name = $plugin_name;
@@ -39,10 +63,11 @@ class Alti_ProtectUploads_Admin
 		// Merge stored settings with defaults
 		$this->settings = wp_parse_args( $stored_settings, $default_settings );
 		
-		// Check if server is running nginx, and if so, force index protection method
+		// .htaccess does nothing on Nginx, so treat the method as index.php.
+		// Only in memory: this runs on every request, and the next settings
+		// save stores it.
 		if ($this->is_nginx() && $this->settings['protection_method'] === 'htaccess') {
 			$this->settings['protection_method'] = 'index';
-			update_option('protect_uploads_settings', $this->settings);
 		}
 	}
 
@@ -87,7 +112,7 @@ class Alti_ProtectUploads_Admin
 
 	public function add_submenu_page()
 	{
-		add_submenu_page('upload.php', __( 'Protect Uploads', 'protect-uploads' ), 'Protect Uploads <span class="dashicons dashicons-shield-alt" style="font-size:15px;"></span>', 'manage_options', $this->plugin_name . '-settings-page', array($this, 'render_settings_page'));
+		add_submenu_page('upload.php', __( 'Protect Uploads', 'protect-uploads' ), esc_html__( 'Protect Uploads', 'protect-uploads' ) . ' <span class="dashicons dashicons-shield-alt" style="font-size:15px;"></span>', 'manage_options', $this->plugin_name . '-settings-page', array($this, 'render_settings_page'));
 	}
 
 	public function render_settings_page()
@@ -126,7 +151,7 @@ class Alti_ProtectUploads_Admin
 								<input type="radio" name="protection" value="index" <?php checked($this->settings['protection_method'], 'index'); ?>>
 								<?php esc_html_e('Use index.php file', 'protect-uploads'); ?>
 							</label>
-							<p class="description"><?php esc_html_e('Create an index.php file on the root of your uploads directory and subfolders (two levels max).', 'protect-uploads'); ?></p>
+							<p class="description"><?php esc_html_e('Create an index.php file on the root of your uploads directory and subfolders (two levels max). New year and month folders get one when the first file is uploaded to them.', 'protect-uploads'); ?></p>
 							<br>
 							<?php $is_nginx = $this->is_nginx(); ?>
 							<label <?php echo $is_nginx ? 'class="disabled"' : ''; ?>>
@@ -157,37 +182,28 @@ class Alti_ProtectUploads_Admin
 								</thead>
 								<tbody>
 									<?php
-									$uploads_dir = self::get_uploads_dir();
 									$upload_folders = self::get_uploads_subdirectories();
-									$baseurl = wp_upload_dir()['baseurl'];
 									$basedir = wp_upload_dir()['basedir'];
-									
+									$unverified = false;
+
 									foreach ($upload_folders as $dir) {
-										$is_protected = self::check_directory_is_protected($dir);
+										$status = self::get_directory_status($dir);
 										$rel_path = str_replace($basedir, '', $dir);
 										$rel_path = empty($rel_path) ? '/' : $rel_path;
-										
-										$protection_type = '';
-										if (file_exists($dir . '/index.php')) {
-											$protection_type = __('index.php', 'protect-uploads');
-										} elseif (file_exists($dir . '/index.html')) {
-											$protection_type = __('index.html', 'protect-uploads');
-										} elseif ($dir === $uploads_dir && file_exists($dir . '/.htaccess') && self::get_uploads_root_response_code() === 403) {
-											$protection_type = __('.htaccess (403)', 'protect-uploads');
-										} elseif (self::get_uploads_root_response_code() === 403) {
-											$protection_type = __('Parent directory protection', 'protect-uploads');
-										}
+										$unverified = $unverified || 'unverified' === $status['status'];
 										?>
 										<tr>
 											<td><?php echo esc_html($rel_path); ?></td>
 											<td>
-												<?php if ($is_protected): ?>
+												<?php if ('protected' === $status['status']): ?>
 													<span class="dashicons dashicons-yes-alt" style="color: green;"></span> <?php esc_html_e('Protected', 'protect-uploads'); ?>
+												<?php elseif ('unverified' === $status['status']): ?>
+													<span class="dashicons dashicons-editor-help" style="color: #996800;"></span> <?php esc_html_e('Could not verify', 'protect-uploads'); ?>
 												<?php else: ?>
 													<span class="dashicons dashicons-warning" style="color: red;"></span> <?php esc_html_e('Not Protected', 'protect-uploads'); ?>
 												<?php endif; ?>
 											</td>
-											<td><?php echo esc_html($protection_type); ?></td>
+											<td><?php echo esc_html($status['method']); ?></td>
 										</tr>
 										<?php
 									}
@@ -198,6 +214,11 @@ class Alti_ProtectUploads_Admin
 						<p class="description">
 							<?php esc_html_e('This table shows protection status for your uploads directory and subdirectories.', 'protect-uploads'); ?>
 						</p>
+						<?php if ($unverified): ?>
+							<p class="description">
+								<?php esc_html_e('Could not verify: this site could not request its own uploads URL, so it is unknown whether the server blocks directory listing in folders without an index file. The check runs again within an hour, or when you save these settings.', 'protect-uploads'); ?>
+							</p>
+						<?php endif; ?>
 						<?php $this->render_upsell( 'render_inline_hint', 'protection' ); ?>
 					</td>
 				</tr>
@@ -231,6 +252,7 @@ class Alti_ProtectUploads_Admin
 								<?php esc_html_e('Enable watermark on uploaded images', 'protect-uploads'); ?>
 							</label>
 							<p class="description"><?php esc_html_e('Automatically add watermark to new image uploads', 'protect-uploads'); ?></p>
+							<p class="description"><?php esc_html_e('The watermark is drawn on the uploaded file itself, so every image size WordPress makes from it carries the mark. An untouched copy of each original is kept in uploads/protect-uploads-originals/, which is blocked from web access on Apache and LiteSpeed. Animated GIFs are left unchanged.', 'protect-uploads'); ?></p>
 							<?php $this->render_upsell( 'render_inline_hint', 'watermark' ); ?>
 						</fieldset>
 					</td>
@@ -281,7 +303,7 @@ class Alti_ProtectUploads_Admin
 								<input type="checkbox" name="enable_right_click_protection" value="1" <?php checked($this->settings['enable_right_click_protection']); ?>>
 								<?php esc_html_e('Disable right-click on images', 'protect-uploads'); ?>
 							</label>
-							<p class="description"><?php esc_html_e('Prevents visitors from right-clicking on images to save them', 'protect-uploads'); ?></p>
+							<p class="description"><?php esc_html_e('Discourages casual copying: disables the right-click menu and dragging on images, and the browser shortcuts for saving the page and opening the inspector. Determined visitors can still save images.', 'protect-uploads'); ?></p>
 						</fieldset>
 					</td>
 				</tr>
@@ -410,9 +432,22 @@ class Alti_ProtectUploads_Admin
 		return "[plugin_name=" . $this->plugin_name . "]";
 	}
 
+	/**
+	 * Content of the index.php files the plugin writes.
+	 *
+	 * The identifier lets remove_index() tell them from other plugins' files.
+	 *
+	 * @since  0.8.0
+	 * @return string
+	 */
+	private function get_index_content()
+	{
+		return "<?php // Silence is golden \n // " . self::get_htaccess_identifier() . " \n // protect-uploads \n // date:" . gmdate('d/m/Y') . "\n // .";
+	}
+
 	public function create_index()
 	{
-		$indexContent = "<?php // Silence is golden \n // " . self::get_htaccess_identifier() . " \n // protect-uploads \n // date:" . gmdate('d/m/Y') . "\n // .";
+		$indexContent = $this->get_index_content();
 		$successful_count = 0;
 		$failed_count = 0;
 		$already_exists_count = 0;
@@ -446,10 +481,9 @@ class Alti_ProtectUploads_Admin
 		if ($successful_count > 0) {
 			self::register_message(
 				sprintf(
-					/* translators: 1: number of directories, 2: "directory" or "directories" */
-					__('Successfully created index.php in %1$d %2$s.', 'protect-uploads'),
-					$successful_count,
-					_n('directory', 'directories', $successful_count, 'protect-uploads')
+					/* translators: %d: number of directories */
+					_n('Successfully created index.php in %d directory.', 'Successfully created index.php in %d directories.', $successful_count, 'protect-uploads'),
+					$successful_count
 				),
 				'updated'
 			);
@@ -458,10 +492,9 @@ class Alti_ProtectUploads_Admin
 		if ($already_exists_count > 0) {
 			self::register_message(
 				sprintf(
-					/* translators: 1: number of directories, 2: "directory" or "directories" */
-					__('Skipped %1$d %2$s where index.php already exists.', 'protect-uploads'),
-					$already_exists_count,
-					_n('directory', 'directories', $already_exists_count, 'protect-uploads')
+					/* translators: %d: number of directories */
+					_n('Skipped %d directory where index.php already exists.', 'Skipped %d directories where index.php already exists.', $already_exists_count, 'protect-uploads'),
+					$already_exists_count
 				),
 				'updated'
 			);
@@ -483,6 +516,44 @@ class Alti_ProtectUploads_Admin
 				'error'
 			);
 		}
+	}
+
+	/**
+	 * Write an index.php into the folder of a new upload and its parent.
+	 *
+	 * create_index() only covers the folders that exist when the settings are
+	 * saved, so each new month (and year) folder would otherwise be listable.
+	 * Runs on the 'wp_handle_upload' filter; checks for the file first, so
+	 * it costs two file_exists() calls per upload.
+	 *
+	 * @since  0.8.0
+	 * @param  array $upload Upload data: file, url, type.
+	 * @return array Unchanged upload data.
+	 */
+	public function protect_upload_folder( $upload )
+	{
+		if ( 'index' !== $this->settings['protection_method'] || empty( $upload['file'] ) || ! empty( $upload['error'] ) ) {
+			return $upload;
+		}
+
+		$basedir = wp_normalize_path( untrailingslashit( self::get_uploads_dir() ) );
+
+		// Only once the site owner has applied the index.php method.
+		if ( ! file_exists( $basedir . '/index.php' ) ) {
+			return $upload;
+		}
+
+		// The same two levels create_index() covers: month and year.
+		$dir = wp_normalize_path( dirname( $upload['file'] ) );
+		for ( $level = 0; $level < 2 && 0 === strpos( $dir, $basedir . '/' ); $level++ ) {
+			if ( ! file_exists( $dir . '/index.php' ) ) {
+				// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- Same as create_index().
+				@file_put_contents( $dir . '/index.php', $this->get_index_content() ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- Failure is handled by the caller.
+			}
+			$dir = dirname( $dir );
+		}
+
+		return $upload;
 	}
 
 	public function create_htaccess()
@@ -518,7 +589,7 @@ class Alti_ProtectUploads_Admin
 				);
 				
 				// Check if the .htaccess is actually working by testing the response code
-				if (self::get_uploads_root_response_code() === 403) {
+				if (self::get_uploads_root_response_code(true) === 403) {
 					self::register_message(
 						__('Directory listing is now blocked (403 Forbidden) as expected.', 'protect-uploads'),
 						'updated'
@@ -560,7 +631,7 @@ class Alti_ProtectUploads_Admin
 			}
 			
 			// Final check to verify protection is working
-			if (self::get_uploads_root_response_code() === 403) {
+			if (self::get_uploads_root_response_code(true) === 403) {
 				self::register_message(
 					__('Directory listing is now blocked (403 Forbidden) as expected.', 'protect-uploads'),
 					'updated'
@@ -580,37 +651,58 @@ class Alti_ProtectUploads_Admin
 		);
 	}
 
+	/**
+	 * Delete the index.php files this plugin wrote, and only those: other
+	 * plugins put their own index.php files in uploads folders.
+	 *
+	 * @since 0.1
+	 * @since 0.8.0 Leaves index.php files it did not create.
+	 */
 	public function remove_index()
 	{
-		$i = 0;
+		$deleted = 0;
 		foreach (self::get_uploads_subdirectories() as $subDirectory) {
-			if (file_exists($subDirectory . '/index.php')) {
-				wp_delete_file($subDirectory . '/index.php');
-				$i++;
+			$file = $subDirectory . '/index.php';
+			if (is_file($file) && is_readable($file)) {
+				// phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- Local file, first bytes only.
+				$head = (string) file_get_contents($file, false, null, 0, 512);
+				if (false !== strpos($head, self::get_htaccess_identifier())) {
+					wp_delete_file($file);
+					$deleted++;
+				}
 			}
 		}
-		if ($i == count(self::get_uploads_subdirectories())) {
-			self::register_message('The index.php file(s) have(has) been deleted.');
+		if ($deleted > 0) {
+			self::register_message(
+				sprintf(
+					/* translators: %d: number of directories */
+					_n('Removed the index.php file from %d directory.', 'Removed the index.php files from %d directories.', $deleted, 'protect-uploads'),
+					$deleted
+				)
+			);
 		}
 	}
 
 	public function remove_htaccess()
 	{
-		if (file_exists(self::get_uploads_dir() . '/.htaccess')) {
-
-			$htaccessContent = file_get_contents(self::get_uploads_dir() . '/.htaccess');
-			$htaccessContent = preg_replace('/(# BEGIN protect-uploads Plugin)(.*?)(# END protect-uploads Plugin)/is', '', $htaccessContent);
-			file_put_contents(self::get_uploads_dir() . '/.htaccess', $htaccessContent, LOCK_EX);
-
-			// if htaccess is empty, we remove it.
-			if (strlen(preg_replace("/(^[\r\n]*|[\r\n]+)[\s\t]*[\r\n]+/", "", file_get_contents(self::get_uploads_dir() . '/.htaccess'))) == 0) {
-				wp_delete_file(self::get_uploads_dir() . '/.htaccess');
-			}
-
-
-			//
-			self::register_message('The htaccess file has been updated.');
+		$htaccess_path = self::get_uploads_dir() . '/.htaccess';
+		if (!file_exists($htaccess_path)) {
+			return;
 		}
+
+		$htaccessContent = file_get_contents($htaccess_path);
+		$stripped = preg_replace('/(# BEGIN protect-uploads Plugin)(.*?)(# END protect-uploads Plugin)/is', '', $htaccessContent);
+		if ($stripped === $htaccessContent) {
+			return;
+		}
+		file_put_contents($htaccess_path, $stripped, LOCK_EX);
+
+		// if htaccess is empty, we remove it.
+		if (strlen(preg_replace("/(^[\r\n]*|[\r\n]+)[\s\t]*[\r\n]+/", "", file_get_contents($htaccess_path))) == 0) {
+			wp_delete_file($htaccess_path);
+		}
+
+		self::register_message(__('The .htaccess file has been updated.', 'protect-uploads'));
 	}
 
 	public function get_protective_files_array()
@@ -634,23 +726,44 @@ class Alti_ProtectUploads_Admin
 		}
 	}
 
-	public function get_uploads_root_response_code()
+	/**
+	 * HTTP status of the uploads root URL, 0 when the request failed.
+	 *
+	 * A blocking loopback request, so it runs at most once per request and
+	 * the result is cached for an hour.
+	 *
+	 * @since  0.1
+	 * @since  0.8.0 Cached.
+	 * @param  bool $fresh Ignore the cached result (after changing the rules).
+	 * @return int
+	 */
+	public function get_uploads_root_response_code( $fresh = false )
 	{
+		if ( ! $fresh ) {
+			if ( null !== $this->root_response_code ) {
+				return $this->root_response_code;
+			}
+			$cached = get_transient( self::ROOT_STATUS_TRANSIENT );
+			if ( false !== $cached ) {
+				$this->root_response_code = (int) $cached;
+				return $this->root_response_code;
+			}
+		}
+
 		$response = wp_safe_remote_get(
-			self::get_uploads_url(),
+			trailingslashit( self::get_uploads_url() ),
 			array(
-				'timeout'      => 5,
+				'timeout'      => 3,
 				'redirection'  => 2,
 				'headers'      => array(),
 				'blocking'     => true,
 			)
 		);
 
-		if ( is_wp_error( $response ) ) {
-			return 0;
-		}
+		$this->root_response_code = is_wp_error( $response ) ? 0 : (int) wp_remote_retrieve_response_code( $response );
+		set_transient( self::ROOT_STATUS_TRANSIENT, $this->root_response_code, HOUR_IN_SECONDS );
 
-		return (int) wp_remote_retrieve_response_code( $response );
+		return $this->root_response_code;
 	}
 
 	public function get_htaccess_content()
@@ -660,112 +773,106 @@ class Alti_ProtectUploads_Admin
 
 	public function check_htaccess_is_self_generated()
 	{
-		if (self::check_protective_file('.htaccess') && preg_match('/' . self::get_htaccess_identifier() . '/', self::get_htaccess_content())) {
+		if (self::check_protective_file('.htaccess') && preg_match('/' . preg_quote(self::get_htaccess_identifier(), '/') . '/', self::get_htaccess_content())) {
 			return true;
 		} else {
 			return false;
 		}
 	}
 
-	// heart? <3
-	public function check_uploads_is_protected()
-	{
-		foreach (self::get_protective_files_array() as $file) {
-			if ($file === 'index.html') {
-				return true;
-				break;
-			}
-			if ($file === 'index.php') {
-				return true;
-				break;
-			}
-			if ($file === '.htaccess' && self::get_uploads_root_response_code() === 200) {
-					return false;
-					break;
-			}
-		}
-		if (self::get_uploads_root_response_code() === 403) {
-			return true;
-		}
-		else {
-			return false;
-		}
-	}
-
-	public function check_protective_file_removable() {
-		if( self::check_protective_file('index.html') ) {
-			return false;
-		}
-		elseif( self::check_protective_file('.htaccess') === false && self::get_uploads_root_response_code() === 403 ) {
-			return false;
-		}
-		else {
-			return true;
-		}
-	}
-
-	public function get_uploads_protection_message_array()
-	{
-		$response = [];
-		foreach (self::get_protective_files_array() as $file) {
-			if ($file === '.htaccess' && self::get_uploads_root_response_code() === 403) {
-				$response[] = '<span class="dashicons dashicons-yes"></span> ' . esc_html__('.htaccess file is present and access to uploads directory returns 403 code.', 'protect-uploads');
-			}
-			if ($file === 'index.php') {
-				$response[] = '<span class="dashicons dashicons-yes"></span> ' . __('index.php file is present.', 'protect-uploads');
-			}
-			if ($file === 'index.html') {
-				$response[] = '<span class="dashicons dashicons-yes"></span> ' . __('index.html file is present.', 'protect-uploads');
-			}
-		}
-		if (self::check_protective_file('.htaccess') === true && self::get_uploads_root_response_code() === 200) {
-			$response[] = '<span class="dashicons dashicons-search"></span> ' . __('.htaccess file is present but not protecting uploads directory.', 'protect-uploads');
-		}
-		if (self::check_protective_file('.htaccess') === false && self::get_uploads_root_response_code() === 403) {
-			$response[] = '<span class="dashicons dashicons-yes"></span> ' . __('Access to uploads directory is protected (403) with a global .htaccess or another global declaration.', 'protect-uploads');
-		}
-		return $response;
-	}
-
-	public function check_apache()
-	{
-		if (!function_exists('apache_get_modules')) {
-			self::register_message('The Protect Uploads plugin cannot work without Apache. Yourself or your web host has to activate this module.');
-		}
-	}
-
-
+	/**
+	 * Add a message to show on the settings page.
+	 *
+	 * @param string $message Message text.
+	 * @param string $type    One of updated, error, warning, info.
+	 * @param int    $id      Unused, kept for compatibility.
+	 */
 	public function register_message($message, $type = 'updated', $id = 0)
 	{
-		$this->messages['apache'][] = array(
+		$this->messages[] = array(
 			'message' => $message,
 			'type' => $type,
-			'id' => $id
 		);
+	}
+
+	/**
+	 * Keep the messages for the current user until the next page load, so
+	 * they survive the redirect after saving.
+	 *
+	 * @since 0.8.0
+	 */
+	private function persist_messages()
+	{
+		if ( ! empty( $this->messages ) ) {
+			set_transient( self::MESSAGES_TRANSIENT . get_current_user_id(), $this->messages, 5 * MINUTE_IN_SECONDS );
+		}
 	}
 
 	public function display_messages()
 	{
 		$output = '';
 
-		// Check for settings-updated query parameter
-		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Display-only parameter, no data processing
-		if ( isset( $_GET['settings-updated'] ) && 'true' === sanitize_text_field( wp_unslash( $_GET['settings-updated'] ) ) ) {
-			$output .= '<div id="message" class="updated"><p>' . esc_html__( 'Settings saved successfully.', 'protect-uploads' ) . '</p></div>';
+		$key = self::MESSAGES_TRANSIENT . get_current_user_id();
+		$stored = get_transient( $key );
+		if ( is_array( $stored ) ) {
+			delete_transient( $key );
+			$this->messages = array_merge( $stored, $this->messages );
 		}
-		
-		// Display any registered messages
-		if ( ! empty( $this->messages ) ) {
-			foreach ( $this->messages as $name => $messages ) {
-				foreach ( $messages as $message ) {
-					// Ensure valid message type (updated, error, warning, info)
-					$type = in_array($message['type'], array('updated', 'error', 'warning', 'info')) ? $message['type'] : 'updated';
-					$output .= '<div id="message" class="' . esc_attr( $type ) . '"><p>' . esc_html( $message['message'] ) . '</p></div>';
-				}
+
+		$classes = array(
+			'updated' => 'notice-success',
+			'error'   => 'notice-error',
+			'warning' => 'notice-warning',
+			'info'    => 'notice-info',
+		);
+
+		foreach ( $this->messages as $message ) {
+			if ( ! is_array( $message ) || ! isset( $message['message'] ) ) {
+				continue;
 			}
+			$type = isset( $message['type'], $classes[ $message['type'] ] ) ? $message['type'] : 'updated';
+			$output .= '<div class="notice ' . esc_attr( $classes[ $type ] ) . '"><p>' . esc_html( $message['message'] ) . '</p></div>';
 		}
-		
+		$this->messages = array();
+
 		return $output;
+	}
+
+	/**
+	 * Warn admins when the password rules could not be written, on the
+	 * plugin's settings page and the media screens.
+	 *
+	 * @since 0.8.0
+	 */
+	public function render_rules_notice()
+	{
+		if ( empty( $this->settings['enable_password_protection'] ) || ! current_user_can( 'manage_options' ) ) {
+			return;
+		}
+
+		// The settings page's screen ID depends on its parent menu, which Pro
+		// changes, so match it by its slug.
+		$screen = get_current_screen();
+		if ( ! $screen || ! ( in_array( $screen->id, array( 'upload', 'attachment' ), true ) || false !== strpos( $screen->id, $this->plugin_name . '-settings-page' ) ) ) {
+			return;
+		}
+
+		if ( ! Alti_ProtectUploads_Password_Rules::write_failed() && 'missing' !== Alti_ProtectUploads_Password_Rules::status() ) {
+			return;
+		}
+		?>
+		<div class="notice notice-error protect-uploads-rules-notice">
+			<p>
+				<?php
+				printf(
+					/* translators: %s: path of the uploads .htaccess file */
+					esc_html__( 'Protect Uploads could not write its rules to %s, so password-protected files can still be downloaded at their direct URL by anyone who has the link. Make the file writable by WordPress, then save the Protect Uploads settings.', 'protect-uploads' ),
+					'<code>' . esc_html( wp_normalize_path( self::get_uploads_dir() ) . '/.htaccess' ) . '</code>'
+				);
+				?>
+			</p>
+		</div>
+		<?php
 	}
 
 	public function save_settings() {
@@ -788,7 +895,7 @@ class Alti_ProtectUploads_Admin
 		}
 
 		// Get the current active tab
-		$active_tab = isset( $_GET['tab'] ) ? sanitize_key( $_GET['tab'] ) : 'directory-protection';
+		$active_tab = isset( $_GET['tab'] ) ? sanitize_key( wp_unslash( $_GET['tab'] ) ) : 'directory-protection';
 
 		// Load existing settings to preserve values not on this form
 		$current_settings = get_option( 'protect_uploads_settings', array() );
@@ -847,6 +954,14 @@ class Alti_ProtectUploads_Admin
 		update_option( 'protect_uploads_settings', $settings );
 		$this->settings = $settings; // Update the local property as well
 
+		// Turning password protection on or off adds or removes the rules
+		// that send protected files' direct URLs to the password prompt.
+		Alti_ProtectUploads_Password_Rules::sync();
+
+		// The protection files may have changed: check the uploads root again
+		// on the next page load.
+		delete_transient( self::ROOT_STATUS_TRANSIENT );
+
 		// If we're on the directory protection tab or the protection method changed,
 		// we need to ensure the proper protection is applied
 		if ($active_tab === 'directory-protection' || $protection_changed) {
@@ -856,7 +971,8 @@ class Alti_ProtectUploads_Admin
 
 		// Add success message
 		$this->register_message( __( 'Settings saved successfully.', 'protect-uploads' ), 'updated' );
-		
+		$this->persist_messages();
+
 		// Redirect to prevent form resubmission, preserving the active tab
 		wp_safe_redirect( add_query_arg( array(
 			'settings-updated' => 'true',
@@ -866,36 +982,41 @@ class Alti_ProtectUploads_Admin
 	}
 
 	/**
-	 * Check if a specific directory is protected
-	 * 
-	 * @param string $directory Path to directory to check
-	 * @return bool True if directory is protected, false otherwise
+	 * Protection status of a directory, from the files in it and the one
+	 * cached check of the uploads root URL.
+	 *
+	 * @since  0.8.0
+	 * @param  string $directory Absolute path.
+	 * @return array {
+	 *     @type string $status 'protected', 'unprotected' or 'unverified'.
+	 *     @type string $method How it is protected, or ''.
+	 * }
 	 */
-	public function check_directory_is_protected($directory) 
+	public function get_directory_status($directory)
 	{
-		// Check if directory has index.php file
 		if (file_exists($directory . '/index.php')) {
-			return true;
+			return array('status' => 'protected', 'method' => __('index.php', 'protect-uploads'));
 		}
-		
-		// Check if directory has index.html file
+
 		if (file_exists($directory . '/index.html')) {
-			return true;
+			return array('status' => 'protected', 'method' => __('index.html', 'protect-uploads'));
 		}
-		
-		// Check if uploads directory has .htaccess and it's returning 403
-		if ($directory === self::get_uploads_dir() && 
-			file_exists($directory . '/.htaccess') && 
-			self::get_uploads_root_response_code() === 403) {
-			return true;
+
+		// "Options -Indexes" in the uploads root applies to every subfolder.
+		$code = self::get_uploads_root_response_code();
+		if (403 === $code) {
+			$is_root = $directory === self::get_uploads_dir();
+			return array(
+				'status' => 'protected',
+				'method' => $is_root ? __('.htaccess (403)', 'protect-uploads') : __('Parent directory protection', 'protect-uploads'),
+			);
 		}
-		
-		// If we're checking a subdirectory, the parent directory's .htaccess may protect it
-		if ($directory !== self::get_uploads_dir() && self::get_uploads_root_response_code() === 403) {
-			return true;
+
+		if (0 === $code) {
+			return array('status' => 'unverified', 'method' => '');
 		}
-		
-		return false;
+
+		return array('status' => 'unprotected', 'method' => '');
 	}
 
 	/**

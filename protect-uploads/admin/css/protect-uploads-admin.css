@@ -87,7 +87,3 @@
 	border-bottom: none;
 }
 
-/* Hide password fields in media modal */
-.media-modal .compat-field-protect_uploads_passwords {
-	display: none;
-} 

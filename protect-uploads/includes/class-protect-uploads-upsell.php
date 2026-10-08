@@ -120,17 +120,19 @@ class Alti_ProtectUploads_Upsell {
 	 * Build a UTM-tagged upgrade URL for a given placement.
 	 *
 	 * @since 0.7.0
+	 * @since 0.8.0 Points to the pricing section and names the placement in utm_content.
 	 * @param string $placement The placement identifier (banner, inline-*, plugins-row, notice).
 	 * @return string The full URL with UTM query args.
 	 */
-	private function upgrade_url( $placement ) {
+	public static function upgrade_url( $placement ) {
 		return add_query_arg(
 			array(
 				'utm_source'   => 'plugin',
 				'utm_medium'   => $placement,
 				'utm_campaign' => 'free-to-pro',
+				'utm_content'  => $placement,
 			),
-			'https://protectuploads.com/'
+			'https://protectuploads.com/#pricing'
 		);
 	}
 
@@ -174,10 +176,10 @@ class Alti_ProtectUploads_Upsell {
 		}
 
 		$bullets = array(
-			__( 'Image watermarks with 9 positions', 'protect-uploads' ),
-			__( 'Expiring and single-use passwords', 'protect-uploads' ),
-			__( 'Role-based access with server enforcement', 'protect-uploads' ),
-			__( 'Download analytics and hotlink blocking', 'protect-uploads' ),
+			__( 'Secure Send: files released by email code', 'protect-uploads' ),
+			__( 'Client Portal with approvals and previews', 'protect-uploads' ),
+			__( 'File requests with a client checklist', 'protect-uploads' ),
+			__( 'Expiring links and single-use passwords', 'protect-uploads' ),
 		);
 		?>
 		<div class="protect-uploads-upsell-banner" id="protect-uploads-upsell-banner">
@@ -188,8 +190,8 @@ class Alti_ProtectUploads_Upsell {
 				<span class="dashicons dashicons-shield"></span>
 			</div>
 			<div class="protect-uploads-upsell-banner-body">
-				<h2 class="protect-uploads-upsell-headline"><?php esc_html_e( 'Protect More. Control Everything.', 'protect-uploads' ); ?></h2>
-				<p class="protect-uploads-upsell-subline"><?php esc_html_e( 'Upgrade to Pro and get the file protection features serious creators actually need.', 'protect-uploads' ); ?></p>
+				<h2 class="protect-uploads-upsell-headline"><?php esc_html_e( 'Send, share and collect client files', 'protect-uploads' ); ?></h2>
+				<p class="protect-uploads-upsell-subline"><?php esc_html_e( 'Pro adds Secure Send, a Client Portal, file requests, and tighter access controls.', 'protect-uploads' ); ?></p>
 				<ul class="protect-uploads-upsell-bullets">
 					<?php foreach ( $bullets as $bullet ) : ?>
 						<li><span class="dashicons dashicons-yes"></span> <?php echo esc_html( $bullet ); ?></li>
@@ -197,7 +199,7 @@ class Alti_ProtectUploads_Upsell {
 				</ul>
 				<p class="protect-uploads-upsell-cta">
 					<a href="<?php echo esc_url( $this->upgrade_url( 'banner' ) ); ?>" class="button button-primary" target="_blank" rel="noopener noreferrer">
-						<?php esc_html_e( 'Upgrade to Pro', 'protect-uploads' ); ?>
+						<?php esc_html_e( 'See Pro features', 'protect-uploads' ); ?>
 					</a>
 				</p>
 			</div>
@@ -223,8 +225,8 @@ class Alti_ProtectUploads_Upsell {
 		}
 		?>
 		<p class="protect-uploads-upsell-quiet-link" style="margin-top:20px;">
-			<a href="<?php echo esc_url( $this->upgrade_url( 'banner' ) ); ?>" target="_blank" rel="noopener noreferrer">
-				<?php esc_html_e( 'Upgrade to Protect Uploads Pro &rarr;', 'protect-uploads' ); ?>
+			<a href="<?php echo esc_url( $this->upgrade_url( 'footer-link' ) ); ?>" target="_blank" rel="noopener noreferrer">
+				<?php esc_html_e( 'See what Protect Uploads Pro adds &rarr;', 'protect-uploads' ); ?>
 			</a>
 		</p>
 		<?php
@@ -249,15 +251,15 @@ class Alti_ProtectUploads_Upsell {
 		$map = array(
 			'watermark'  => array(
 				'placement' => 'inline-watermark',
-				'text'      => __( 'Pro adds image watermarks with 9 placement positions, custom opacity, and one-click bulk re-watermarking across your library.', 'protect-uploads' ),
+				'text'      => __( 'Pro adds logo watermarks, 9 placement positions, and bulk watermarking, with originals kept so you can restore them.', 'protect-uploads' ),
 			),
 			'passwords'  => array(
 				'placement' => 'inline-passwords',
-				'text'      => __( 'Pro unlocks expiring, single-use, and limited-use passwords plus brute-force rate limiting for stronger file security.', 'protect-uploads' ),
+				'text'      => __( 'Pro adds expiring, single-use and limited-use passwords, and Secure Send to email files behind a one-time code.', 'protect-uploads' ),
 			),
 			'protection' => array(
 				'placement' => 'inline-protection',
-				'text'      => __( 'Pro enforces access at the server level with role-based rules and rotating-token hotlink protection.', 'protect-uploads' ),
+				'text'      => __( 'Pro adds role-based access rules enforced on every file request, and hotlink protection.', 'protect-uploads' ),
 			),
 		);
 
@@ -323,20 +325,27 @@ class Alti_ProtectUploads_Upsell {
 			return;
 		}
 
+		$settings_screen = 'media_page_' . $this->plugin_name . '-settings-page';
 		$allowed_screens = array(
-			'upload',                                       // upload.php
-			'plugins',                                      // plugins.php
-			'media_page_' . $this->plugin_name . '-settings-page', // plugin settings page
+			'upload',         // upload.php
+			'plugins',        // plugins.php
+			$settings_screen, // plugin settings page
 		);
 
 		if ( ! in_array( $screen->id, $allowed_screens, true ) ) {
+			return;
+		}
+
+		// One upgrade message per screen: the settings page shows the banner
+		// until it is dismissed.
+		if ( $settings_screen === $screen->id && ! $this->banner_is_dismissed() ) {
 			return;
 		}
 		?>
 		<div class="notice notice-info is-dismissible protect-uploads-upsell-notice" id="protect-uploads-upsell-notice" data-nonce="<?php echo esc_attr( wp_create_nonce( 'protect_uploads_dismiss_notice' ) ); ?>">
 			<p>
 				<span class="dashicons dashicons-shield" style="color:#f7a933;vertical-align:middle;"></span>
-				<?php esc_html_e( 'Protect Uploads Pro adds image watermarking, expiring links, analytics, and server-level access control for photographers and creators.', 'protect-uploads' ); ?>
+				<?php esc_html_e( 'Protect Uploads Pro adds Secure Send for emailing files with a one-time code, and a Client Portal where clients sign in to see their files.', 'protect-uploads' ); ?>
 			</p>
 			<p>
 				<a href="<?php echo esc_url( $this->upgrade_url( 'notice' ) ); ?>" class="button button-primary" target="_blank" rel="noopener noreferrer">

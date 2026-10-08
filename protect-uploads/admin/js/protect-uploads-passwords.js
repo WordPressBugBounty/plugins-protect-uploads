@@ -1,6 +1,24 @@
 (function($) {
     'use strict';
 
+    // Labels are user input: build the list with text nodes, not HTML.
+    function renderPasswords(container, passwords) {
+        var list = container.find('.existing-passwords').empty();
+        if (!passwords.length) {
+            return;
+        }
+        list.append($('<h4>').text(protectUploadsPasswords.i18n.existingPasswords));
+        var ul = $('<ul>');
+        passwords.forEach(function(pass) {
+            ul.append(
+                $('<li>').text(pass.password_label + ' ').append(
+                    $('<a href="#" class="delete-password">').attr('data-id', pass.id).text(protectUploadsPasswords.i18n.delete)
+                )
+            );
+        });
+        list.append(ul);
+    }
+
     $(document).ready(function() {
         // Handle adding new passwords
         $('.protect-uploads-passwords .add-password-button').on('click', function(e) {
@@ -34,24 +52,13 @@
                         container.find('input[name="protect_uploads_password"]').val('');
                         
                         // Update password list
-                        var passwordList = '';
-                        if (response.data.passwords.length) {
-                            passwordList += '<h4>' + protectUploadsPasswords.i18n.existingPasswords + '</h4>';
-                            passwordList += '<ul>';
-                            response.data.passwords.forEach(function(pass) {
-                                passwordList += '<li>' + pass.password_label;
-                                passwordList += ' <a href="#" class="delete-password" data-id="' + pass.id + '">';
-                                passwordList += protectUploadsPasswords.i18n.delete + '</a></li>';
-                            });
-                            passwordList += '</ul>';
-                        }
-                        container.find('.existing-passwords').html(passwordList);
+                        renderPasswords(container, response.data.passwords);
                     } else {
                         alert(response.data.message);
                     }
                 },
                 error: function() {
-                    alert('Error adding password');
+                    alert(protectUploadsPasswords.i18n.addError);
                 },
                 complete: function() {
                     container.find('.add-password-button').prop('disabled', false)
@@ -86,24 +93,13 @@
                 success: function(response) {
                     if (response.success) {
                         // Update password list
-                        var passwordList = '';
-                        if (response.data.passwords.length) {
-                            passwordList += '<h4>' + protectUploadsPasswords.i18n.existingPasswords + '</h4>';
-                            passwordList += '<ul>';
-                            response.data.passwords.forEach(function(pass) {
-                                passwordList += '<li>' + pass.password_label;
-                                passwordList += ' <a href="#" class="delete-password" data-id="' + pass.id + '">';
-                                passwordList += protectUploadsPasswords.i18n.delete + '</a></li>';
-                            });
-                            passwordList += '</ul>';
-                        }
-                        container.find('.existing-passwords').html(passwordList);
+                        renderPasswords(container, response.data.passwords);
                     } else {
                         alert(response.data.message);
                     }
                 },
                 error: function() {
-                    alert('Error deleting password');
+                    alert(protectUploadsPasswords.i18n.deleteError);
                 }
             });
         });

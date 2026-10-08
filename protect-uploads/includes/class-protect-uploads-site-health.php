@@ -101,6 +101,14 @@ class Alti_ProtectUploads_Site_Health {
 			'test'  => array( $this, 'test_server_config' ),
 		);
 
+		$settings = get_option( 'protect_uploads_settings', array() );
+		if ( ! empty( $settings['enable_password_protection'] ) ) {
+			$tests['direct']['protect_uploads_password_direct_urls'] = array(
+				'label' => __( 'Direct URLs of password-protected files', 'protect-uploads' ),
+				'test'  => array( $this, 'test_password_direct_urls' ),
+			);
+		}
+
 		$tests['async']['protect_uploads_sensitive_files'] = array(
 			'label'             => __( 'Sensitive file types in uploads', 'protect-uploads' ),
 			'test'              => self::ASYNC_ACTION,
@@ -130,13 +138,9 @@ class Alti_ProtectUploads_Site_Health {
 			),
 			'description' => sprintf(
 				'<p>%s</p>',
-				esc_html__( 'A visitor cannot list the contents of your uploads directory. Protect Uploads Pro adds hotlink protection, watermarking, and password-protected downloads.', 'protect-uploads' )
+				esc_html__( 'A visitor cannot list the contents of your uploads directory.', 'protect-uploads' ) . $this->pro_sentence()
 			),
-			'actions'     => sprintf(
-				'<p><a href="%s">%s</a></p>',
-				esc_url( 'https://protectuploads.com' ),
-				esc_html__( 'Learn more about Protect Uploads Pro', 'protect-uploads' )
-			),
+			'actions'     => $this->pro_link(),
 			'test'        => 'protect_uploads_directory_browsing',
 		);
 
@@ -159,6 +163,62 @@ class Alti_ProtectUploads_Site_Health {
 	}
 
 	/**
+	 * Direct test: are password-protected files refused at their direct URL?
+	 *
+	 * A password only changes the links WordPress prints; the file's own
+	 * uploads URL is covered by the rules in the uploads .htaccess file, which
+	 * only Apache and LiteSpeed read.
+	 *
+	 * @since 0.8.0
+	 * @return array A Site Health result array.
+	 */
+	public function test_password_direct_urls() {
+		$status = Alti_ProtectUploads_Password_Rules::status();
+
+		$result = array(
+			'label'       => __( 'Password-protected files are protected at their direct URL', 'protect-uploads' ),
+			'status'      => 'good',
+			'badge'       => array(
+				'label' => __( 'Security', 'protect-uploads' ),
+				'color' => 'blue',
+			),
+			'description' => sprintf(
+				'<p>%s</p>',
+				'none' === $status
+					? esc_html__( 'No media file has a password yet.', 'protect-uploads' )
+					: esc_html__( 'Requests for the uploads URL of a password-protected file are sent to the password prompt.', 'protect-uploads' )
+			),
+			'actions'     => '',
+			'test'        => 'protect_uploads_password_direct_urls',
+		);
+
+		if ( 'unsupported' === $status ) {
+			$result['status']         = 'recommended';
+			$result['label']          = __( 'Password-protected files can be downloaded at their direct URL', 'protect-uploads' );
+			$result['badge']['color'] = 'orange';
+			$result['description']    = sprintf(
+				'<p>%s</p>',
+				esc_html__( 'Your server does not read .htaccess files (for example, Nginx), so the rules that send direct requests to the password prompt do not apply. Anyone who has a protected file\'s uploads URL can download it without the password. Add an equivalent rule to your server configuration, or move the files out of the uploads directory.', 'protect-uploads' )
+			);
+		} elseif ( 'missing' === $status ) {
+			$result['status']         = 'critical';
+			$result['label']          = __( 'Password-protected files can be downloaded at their direct URL', 'protect-uploads' );
+			$result['badge']['color'] = 'red';
+			$result['description']    = sprintf(
+				'<p>%s</p>',
+				esc_html__( 'The rules that send direct requests for password-protected files to the password prompt are missing from, or out of date in, the uploads .htaccess file. This usually means the file is not writable. Until it is fixed, anyone who has a protected file\'s uploads URL can download it without the password.', 'protect-uploads' )
+			);
+			$result['actions'] = sprintf(
+				'<p><a href="%s">%s</a></p>',
+				esc_url( $this->get_settings_url() ),
+				esc_html__( 'Make the uploads .htaccess file writable, then save the Protect Uploads settings', 'protect-uploads' )
+			);
+		}
+
+		return $result;
+	}
+
+	/**
 	 * Direct test: report the detected server configuration (Apache/Nginx).
 	 *
 	 * @since 0.7.0
@@ -174,11 +234,7 @@ class Alti_ProtectUploads_Site_Health {
 				'label' => __( 'Security', 'protect-uploads' ),
 				'color' => 'blue',
 			),
-			'actions' => sprintf(
-				'<p><a href="%s">%s</a></p>',
-				esc_url( 'https://protectuploads.com' ),
-				esc_html__( 'Protect Uploads Pro adds hotlink protection, watermarking, and password-protected downloads', 'protect-uploads' )
-			),
+			'actions' => $this->pro_link( true ),
 			'test'    => 'protect_uploads_server_config',
 		);
 
@@ -186,12 +242,12 @@ class Alti_ProtectUploads_Site_Health {
 			$result['label']       = __( 'Your server is running Nginx', 'protect-uploads' );
 			$result['description'] = sprintf(
 				'<p>%s</p>',
-				esc_html__( 'Nginx does not read .htaccess files, so .htaccess-based rules will not apply. Use the index.php protection method on the Protect Uploads settings screen, and add the recommended rules to your Nginx server block to block directory listing.', 'protect-uploads' )
+				esc_html__( 'Nginx does not read .htaccess files, so .htaccess-based rules will not apply. Use the index.php protection method on the Protect Uploads settings screen, and make sure "autoindex" is off for your uploads directory in the Nginx configuration.', 'protect-uploads' )
 			);
 			$result['actions'] = sprintf(
 				'<p><a href="%s">%s</a></p>',
 				esc_url( $this->get_settings_url() ),
-				esc_html__( 'Open Protect Uploads settings for Nginx instructions', 'protect-uploads' )
+				esc_html__( 'Open Protect Uploads settings', 'protect-uploads' )
 			);
 		} elseif ( 'apache' === $server ) {
 			$result['label']       = __( 'Your server is running Apache', 'protect-uploads' );
@@ -229,13 +285,9 @@ class Alti_ProtectUploads_Site_Health {
 				),
 				'description' => sprintf(
 					'<p>%s</p>',
-					esc_html__( 'Your uploads directory does not contain executable file types such as .php or .cgi. Protect Uploads Pro adds hotlink protection, watermarking, and password-protected downloads.', 'protect-uploads' )
+					esc_html__( 'Your uploads directory does not contain executable file types such as .php or .cgi.', 'protect-uploads' ) . $this->pro_sentence()
 				),
-				'actions'     => sprintf(
-					'<p><a href="%s">%s</a></p>',
-					esc_url( 'https://protectuploads.com' ),
-					esc_html__( 'Learn more about Protect Uploads Pro', 'protect-uploads' )
-				),
+				'actions'     => $this->pro_link(),
 				'test'        => 'protect_uploads_sensitive_files',
 			);
 		}
@@ -350,6 +402,9 @@ class Alti_ProtectUploads_Site_Health {
 	 * @return bool True when the rules prevent directory browsing.
 	 */
 	private function htaccess_blocks_browsing( $contents ) {
+		// The password rules route single files, not folders: ignore them.
+		$contents = (string) preg_replace( '/^# BEGIN ' . preg_quote( Alti_ProtectUploads_Password_Rules::MARKER, '/' ) . '\r?\n.*?^# END ' . preg_quote( Alti_ProtectUploads_Password_Rules::MARKER, '/' ) . '[ \t]*$/ms', '', $contents );
+
 		if ( false !== stripos( $contents, 'Options -Indexes' ) ) {
 			return true;
 		}
@@ -417,7 +472,10 @@ class Alti_ProtectUploads_Site_Health {
 				++$seen;
 
 				$ext = strtolower( pathinfo( $entry, PATHINFO_EXTENSION ) );
-				if ( in_array( $ext, self::RISKY_EXTENSIONS, true ) ) {
+				// Empty "Silence is golden" index.php files are what both this
+				// plugin and Protect Uploads Pro write to block folder listings;
+				// flagging them would tell owners to delete their protection.
+				if ( in_array( $ext, self::RISKY_EXTENSIONS, true ) && ! self::is_inert_php_stub( $path ) ) {
 					$rel     = ltrim( substr( $path, strlen( $basedir ) ), '/\\' );
 					$found[] = '' === $rel ? $entry : $rel;
 				}
@@ -482,5 +540,73 @@ class Alti_ProtectUploads_Site_Health {
 	 */
 	private function get_settings_url() {
 		return admin_url( 'upload.php?page=protect-uploads-settings-page' );
+	}
+
+	/**
+	 * The Pro sentence appended to passing tests, or '' when Pro is present:
+	 * customers who already have Pro are not pitched it.
+	 *
+	 * @since 0.8.0
+	 * @return string Escaped sentence with a leading space, or ''.
+	 */
+	/**
+	 * Whether a file is a small PHP stub containing nothing but comments, such as
+	 * the "Silence is golden" index.php files written to block folder listings.
+	 * Any executable code, inline HTML or a file over 1 KB is not a stub.
+	 *
+	 * @since 0.8.0
+	 * @param string    $path          Absolute file path.
+	 * @param bool|null $use_tokenizer Force the tokenizer on or off (tests); null = auto.
+	 * @return bool True only for a comment-only PHP file.
+	 */
+	public static function is_inert_php_stub( $path, $use_tokenizer = null ) {
+		if ( ! is_file( $path ) || filesize( $path ) > 1024 ) {
+			return false;
+		}
+		$code = @file_get_contents( $path ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged, WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- Local file, size-capped above.
+		if ( false === $code || 0 !== strpos( ltrim( $code ), '<?php' ) ) {
+			return false;
+		}
+		if ( null === $use_tokenizer ) {
+			$use_tokenizer = function_exists( 'token_get_all' );
+		}
+		if ( $use_tokenizer ) {
+			$allowed = array( T_OPEN_TAG, T_COMMENT, T_DOC_COMMENT, T_WHITESPACE, T_CLOSE_TAG );
+			foreach ( token_get_all( $code ) as $token ) {
+				if ( ! is_array( $token ) || ! in_array( $token[0], $allowed, true ) ) {
+					return false;
+				}
+			}
+			return true;
+		}
+		// No tokenizer: strip the open/close tags and comments; anything left is code.
+		$rest = preg_replace( array( '/^\s*<\?php/', '/\?>\s*$/', '#/\*.*?\*/#s', '#//[^\n]*#', '/#[^\n]*/' ), '', $code );
+		return null !== $rest && '' === trim( $rest );
+	}
+
+	private function pro_sentence() {
+		if ( Alti_ProtectUploads_Upsell::is_pro_present() ) {
+			return '';
+		}
+		return ' ' . esc_html__( 'Protect Uploads Pro adds Secure Send, a Client Portal, hotlink protection, logo watermarks and role-based access.', 'protect-uploads' );
+	}
+
+	/**
+	 * The "Learn more about Protect Uploads Pro" action, or '' when Pro is present.
+	 *
+	 * @since 0.8.0
+	 * @param bool $with_sentence Put the Pro sentence before the link, for tests whose description is technical.
+	 * @return string HTML for the test's actions, or ''.
+	 */
+	private function pro_link( $with_sentence = false ) {
+		if ( Alti_ProtectUploads_Upsell::is_pro_present() ) {
+			return '';
+		}
+		return sprintf(
+			'<p>%s<a href="%s" target="_blank" rel="noopener noreferrer">%s</a></p>',
+			$with_sentence ? ltrim( $this->pro_sentence() ) . ' ' : '',
+			esc_url( Alti_ProtectUploads_Upsell::upgrade_url( 'site-health' ) ),
+			esc_html__( 'Learn more about Protect Uploads Pro', 'protect-uploads' )
+		);
 	}
 }

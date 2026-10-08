@@ -46,84 +46,35 @@ class Alti_ProtectUploads_Passwords {
 			// Handle AJAX actions
 			add_action( 'wp_ajax_protect_uploads_add_password', array( $this, 'ajax_add_password' ) );
 			add_action( 'wp_ajax_protect_uploads_delete_password', array( $this, 'ajax_delete_password' ) );
-			add_action( 'wp_ajax_verify_attachment_password', array( $this, 'verify_attachment_password' ) );
-			add_action( 'wp_ajax_nopriv_verify_attachment_password', array( $this, 'verify_attachment_password' ) );
 			
 			// Handle frontend URL modification
 			add_filter( 'wp_get_attachment_url', array( $this, 'modify_attachment_url' ), 10, 2 );
+
+			// New image sizes or a deleted file change which paths need rules.
+			add_filter( 'wp_update_attachment_metadata', array( $this, 'sync_rules_for_changed_attachment' ), 10, 2 );
+			add_action( 'delete_attachment', array( $this, 'sync_rules_for_changed_attachment' ), 20 );
 		}
 	}
 
 	/**
-	 * Add password fields to media modal and edit screen
+	 * Re-sync the direct-URL rules when a protected attachment's files change.
 	 *
-	 * @since    0.5.2
-	 * @param    array   $form_fields    Array of form fields.
-	 * @param    WP_Post $post           Attachment post object.
-	 * @return   array
-	 */
-	public function add_password_fields( $form_fields, $post ) {
-		$passwords = $this->get_attachment_passwords( $post->ID );
-		
-		$html = '<div class="protect-uploads-passwords">';
-		$html .= wp_nonce_field( 'protect_uploads_save_password_' . $post->ID, 'protect_uploads_password_nonce', false, false );
-		$html .= '<div class="existing-passwords">';
-		if ( ! empty( $passwords ) ) {
-			$html .= '<h4>' . esc_html__( 'Existing Passwords', 'protect-uploads' ) . '</h4>';
-			$html .= '<ul>';
-			foreach ( $passwords as $password ) {
-				$html .= '<li>';
-				$html .= esc_html( $password->password_label );
-				$html .= ' <a href="#" class="delete-password" data-id="' . esc_attr( $password->id ) . '">';
-				$html .= esc_html__( 'Delete', 'protect-uploads' );
-				$html .= '</a>';
-				$html .= '</li>';
-			}
-			$html .= '</ul>';
-		}
-		$html .= '</div>';
-		
-		$html .= '<div class="add-password">';
-		$html .= '<input type="text" name="protect_uploads_password_label" placeholder="' . esc_attr__( 'Password Label', 'protect-uploads' ) . '" />';
-		$html .= '<input type="password" name="protect_uploads_password" placeholder="' . esc_attr__( 'Password', 'protect-uploads' ) . '" />';
-		$html .= '<button type="button" class="button add-password-button">' . esc_html__( 'Add Password', 'protect-uploads' ) . '</button>';
-		$html .= '</div>';
-		$html .= '</div>';
-
-		$form_fields['protect_uploads_passwords'] = array(
-			'label' => __( 'Password Protection', 'protect-uploads' ),
-			'input' => 'html',
-			'html'  => $html,
-		);
-
-		return $form_fields;
-	}
-
-	/**
-	 * Save password fields
+	 * Used as a filter (wp_update_attachment_metadata) and as an action
+	 * (delete_attachment), so it accepts either signature.
 	 *
-	 * @since    0.5.2
-	 * @param    array   $post       Attachment post array.
-	 * @param    array   $attachment Attachment fields array.
-	 * @return   array
+	 * @since  0.8.0
+	 * @param  mixed $data_or_id    Attachment metadata, or the attachment ID.
+	 * @param  int   $attachment_id Attachment ID when used as a filter.
+	 * @return mixed The metadata, unchanged.
 	 */
-	public function save_password_fields( $post, $attachment ) {
-		// Verify nonce first
-		$nonce = isset( $_POST['protect_uploads_password_nonce'] ) ? sanitize_text_field( wp_unslash( $_POST['protect_uploads_password_nonce'] ) ) : '';
-		if ( ! wp_verify_nonce( $nonce, 'protect_uploads_save_password_' . $post['ID'] ) ) {
-			// Nonce is invalid, maybe log this or return the post array without changes
-			return $post; 
+	public function sync_rules_for_changed_attachment( $data_or_id, $attachment_id = 0 ) {
+		$attachment_id = $attachment_id ? $attachment_id : absint( $data_or_id );
+
+		if ( $attachment_id && $this->has_passwords( $attachment_id ) ) {
+			add_action( 'shutdown', array( 'Alti_ProtectUploads_Password_Rules', 'sync' ) );
 		}
-		
-		// Check if both password and label are set and password is not empty
-		if ( isset( $_POST['protect_uploads_password'], $_POST['protect_uploads_password_label'] ) && ! empty( $_POST['protect_uploads_password'] ) ) {
-			$this->add_attachment_password(
-				$post['ID'],
-				sanitize_text_field( wp_unslash( $_POST['protect_uploads_password'] ) ),
-				sanitize_text_field( wp_unslash( $_POST['protect_uploads_password_label'] ) )
-			);
-		}
-		return $post;
+
+		return $data_or_id;
 	}
 
 	/**
@@ -176,7 +127,12 @@ class Alti_ProtectUploads_Passwords {
 		wp_cache_delete( 'protect_uploads_has_passwords_' . $attachment_id, 'protect_uploads' );
 		wp_cache_delete( 'protect_uploads_password_hashes_' . $attachment_id, 'protect_uploads' );
 
-		return $wpdb->insert_id;
+		$insert_id = $wpdb->insert_id;
+
+		// Route the file's direct URL to the password prompt.
+		Alti_ProtectUploads_Password_Rules::sync();
+
+		return $insert_id;
 	}
 
 	/**
@@ -218,16 +174,40 @@ class Alti_ProtectUploads_Passwords {
 	 * @return   string
 	 */
 	public function modify_attachment_url( $url, $attachment_id ) {
+		// People who can edit the file see its real URL in wp-admin and in the
+		// editor's REST requests: WordPress builds thumbnail and srcset URLs by
+		// swapping the file name in this URL, which breaks on the prompt URL.
+		// The direct URL still goes through the prompt, which lets them in.
+		if ( ( is_admin() || ( defined( 'REST_REQUEST' ) && REST_REQUEST ) ) && current_user_can( 'edit_post', $attachment_id ) ) {
+			return $url;
+		}
+
 		if ( $this->has_passwords( $attachment_id ) ) {
-			return add_query_arg(
-				array(
-					'protect_uploads_file' => $attachment_id,
-					'_wpnonce'            => wp_create_nonce( 'protect_uploads_' . $attachment_id ),
-				),
-				home_url( 'index.php' )
-			);
+			// No nonce: it tied the link to one visitor's session and broke it
+			// after a day or when served from a page cache. The password is the
+			// gate; anyone may load the prompt.
+			return self::get_gate_url( $attachment_id );
 		}
 		return $url;
+	}
+
+	/**
+	 * URL of the password prompt for an attachment.
+	 *
+	 * @since  0.8.0
+	 * @param  int    $attachment_id Attachment ID.
+	 * @param  string $relative_path Optional. File to serve after the password,
+	 *                               relative to the uploads directory (a size
+	 *                               or format copy). Defaults to the main file.
+	 * @return string
+	 */
+	public static function get_gate_url( $attachment_id, $relative_path = '' ) {
+		$args = array( 'protect_uploads_file' => absint( $attachment_id ) );
+		if ( '' !== (string) $relative_path ) {
+			$args['protect_uploads_path'] = rawurlencode( ltrim( (string) $relative_path, '/' ) );
+		}
+
+		return add_query_arg( $args, home_url( 'index.php' ) );
 	}
 
 	/**
@@ -240,11 +220,13 @@ class Alti_ProtectUploads_Passwords {
 	public function has_passwords( $attachment_id ) {
 		global $wpdb;
 
+		// Cached as 1/0: a cached false would read back as a miss and query
+		// again on every call for files without a password.
 		$cache_key = 'protect_uploads_has_passwords_' . $attachment_id;
 		$cached = wp_cache_get( $cache_key, 'protect_uploads' );
 
 		if ( false !== $cached ) {
-			return $cached;
+			return (bool) $cached;
 		}
 
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery -- Custom table requires direct query
@@ -256,35 +238,9 @@ class Alti_ProtectUploads_Passwords {
 		);
 
 		$result = $count > 0;
-		wp_cache_set( $cache_key, $result, 'protect_uploads', HOUR_IN_SECONDS );
+		wp_cache_set( $cache_key, $result ? 1 : 0, 'protect_uploads', HOUR_IN_SECONDS );
 
 		return $result;
-	}
-
-	/**
-	 * Verify attachment password
-	 *
-	 * @since    0.5.2
-	 */
-	public function verify_attachment_password() {
-		check_ajax_referer( 'protect_uploads_verify_password', 'nonce' );
-
-		$attachment_id = isset( $_POST['attachment_id'] ) ? intval( $_POST['attachment_id'] ) : 0;
-		$password = isset( $_POST['password'] ) ? sanitize_text_field( wp_unslash( $_POST['password'] ) ) : '';
-
-		if ( ! $attachment_id || ! $password ) {
-			wp_send_json_error( array( 'message' => __( 'Invalid request', 'protect-uploads' ) ) );
-		}
-
-		$verified = $this->verify_password( $attachment_id, $password );
-		if ( $verified ) {
-			$this->log_access( $attachment_id, $verified, 'view' );
-			wp_send_json_success( array(
-				'url' => wp_get_attachment_url( $attachment_id ),
-			) );
-		}
-
-		wp_send_json_error( array( 'message' => __( 'Invalid password', 'protect-uploads' ) ) );
 	}
 
 	/**
@@ -321,9 +277,17 @@ class Alti_ProtectUploads_Passwords {
 			return false;
 		}
 
+		// Reserve a slot atomically before doing any password hashing. Checking
+		// and then incrementing a transient lets parallel requests share a slot.
+		$window = $this->change_attempt( $attachment_id, 1 );
+		if ( false === $window ) {
+			return false;
+		}
+
 		// Check against all passwords
 		foreach ( $passwords as $pwd ) {
 			if ( wp_check_password( $password, $pwd->password_hash ) ) {
+				$this->change_attempt( $attachment_id, -1, $window );
 				return $pwd->id;
 			}
 		}
@@ -335,6 +299,165 @@ class Alti_ProtectUploads_Passwords {
 	}
 
 	/**
+	 * Whether the current visitor has failed too often on this file recently.
+	 *
+	 * @since  0.8.0
+	 * @param  int $attachment_id Attachment ID.
+	 * @return bool
+	 */
+	public function is_rate_limited( $attachment_id ) {
+		/**
+		 * Filters how many failed password attempts a visitor gets per file.
+		 *
+		 * @since 0.8.0
+		 * @param int $max_attempts Failed attempts allowed within the window.
+		 */
+		$max_attempts = (int) apply_filters( 'protect_uploads_max_password_attempts', 5 );
+
+		$state = $this->read_attempts( $attachment_id );
+		return false === $state || ( $state['until'] >= time() && $state['count'] >= max( 1, $max_attempts ) );
+	}
+
+	/**
+	 * Read the counter directly, including when a persistent cache is used.
+	 *
+	 * The expiry and count share one row so they can be changed together.
+	 * The companion timeout row lets WordPress clean up expired counters.
+	 *
+	 * @since 0.8.0
+	 * @param int $attachment_id Attachment ID.
+	 * @return array|false Counter state, or false on a database/format error.
+	 */
+	private function read_attempts( $attachment_id ) {
+		global $wpdb;
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Atomic rate limit always uses the database, never a cached count.
+		$raw = $wpdb->get_var( $wpdb->prepare( "SELECT option_value FROM {$wpdb->options} WHERE option_name = %s", '_transient_' . $this->rate_limit_key( $attachment_id ) ) );
+		if ( $wpdb->last_error || ( null !== $raw && ! preg_match( '/^\d+:\d+$/', $raw ) ) ) {
+			return false;
+		}
+		$parts = null === $raw ? array( 0, 0 ) : explode( ':', $raw );
+		return array( 'raw' => $raw, 'until' => (int) $parts[0], 'count' => (int) $parts[1] );
+	}
+
+	/**
+	 * Remove expired database counters on core's daily cleanup hook.
+	 *
+	 * Core skips database transients when a persistent object cache is active;
+	 * our counters deliberately use the database on all sites for atomicity.
+	 * Only this plugin's expired rows are removed, together with their timeout.
+	 *
+	 * @since 0.8.0
+	 */
+	public static function cleanup_expired_attempts() {
+		global $wpdb;
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Private, non-autoloaded atomic counters are never read through an object cache.
+		$wpdb->query( $wpdb->prepare(
+			"DELETE a, b FROM {$wpdb->options} a INNER JOIN {$wpdb->options} b ON b.option_name = CONCAT('_transient_timeout_', SUBSTRING(a.option_name, 12)) WHERE a.option_name LIKE %s AND CAST(b.option_value AS UNSIGNED) < %d",
+			$wpdb->esc_like( '_transient_protect_uploads_rl_' ) . '%',
+			time()
+		) );
+	}
+
+	/**
+	 * Reserve an attempt, or refund a successful one in the same window.
+	 *
+	 * Compare-and-swap prevents lost increments without relying on an object
+	 * cache's atomic-increment implementation. Contention and DB errors fail
+	 * closed. A late success cannot refund an attempt in a newer window.
+	 *
+	 * @since 0.8.0
+	 * @param int $attachment_id Attachment ID.
+	 * @param int $change        1 to count an attempt, -1 to give it back.
+	 * @param int $window        Original window expiry when refunding.
+	 * @return int|false Window expiry on success, false if no slot is available.
+	 */
+	private function change_attempt( $attachment_id, $change, $window = 0 ) {
+		global $wpdb;
+		/**
+		 * Filters the rate-limit window, in minutes.
+		 *
+		 * @since 0.8.0
+		 * @param int $minutes Window length.
+		 */
+		$minutes = max( 1, (int) apply_filters( 'protect_uploads_password_lockout_minutes', 15 ) );
+		$key     = $this->rate_limit_key( $attachment_id );
+		$name    = '_transient_' . $key;
+		$max     = max( 1, (int) apply_filters( 'protect_uploads_max_password_attempts', 5 ) );
+
+		for ( $try = 0; $try < 20; $try++ ) {
+			$state = $this->read_attempts( $attachment_id );
+			if ( false === $state ) {
+				return false;
+			}
+			$now     = time();
+			$expired = $state['until'] < $now;
+			if ( $change < 0 && ( $expired || $window !== $state['until'] ) ) {
+				return false;
+			}
+			$count = $expired ? 0 : $state['count'];
+			$until = $expired ? $now + $minutes * MINUTE_IN_SECONDS : $state['until'];
+			if ( $change > 0 && $count >= $max ) {
+				return false;
+			}
+			$value = $until . ':' . max( 0, $count + $change );
+			// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Compare-and-swap on a private, non-autoloaded counter.
+			if ( $expired ) {
+				// Refresh cleanup's deadline before reviving an expired counter:
+				// otherwise cron could delete a newly claimed attempt in between.
+				$timeout = '_transient_timeout_' . $key;
+				$saved   = $wpdb->query( $wpdb->prepare( "INSERT INTO {$wpdb->options} (option_name, option_value, autoload) VALUES (%s, %s, 'no') ON DUPLICATE KEY UPDATE option_value = GREATEST(CAST(option_value AS UNSIGNED), %d)", $timeout, (string) $until, $until ) );
+				wp_cache_delete( $timeout, 'options' );
+				if ( false === $saved ) {
+					return false;
+				}
+			}
+			if ( null === $state['raw'] ) {
+				$changed = $wpdb->query( $wpdb->prepare( "INSERT IGNORE INTO {$wpdb->options} (option_name, option_value, autoload) VALUES (%s, %s, 'no')", $name, $value ) );
+			} else {
+				$changed = $wpdb->query( $wpdb->prepare( "UPDATE {$wpdb->options} SET option_value = %s WHERE option_name = %s AND option_value = %s", $value, $name, $state['raw'] ) );
+			}
+			if ( false === $changed ) {
+				return false;
+			}
+			if ( 1 !== $changed ) {
+				continue;
+			}
+			// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+			wp_cache_delete( $name, 'options' );
+			return $until;
+		}
+
+		return false;
+	}
+
+	/**
+	 * Transient key for the visitor's attempts on a file.
+	 *
+	 * IPv6 visitors are grouped by their /64 network: one connection usually
+	 * holds a whole /64, so per-address counting could be escaped by
+	 * changing the last half of the address.
+	 *
+	 * @since  0.8.0
+	 * @param  int $attachment_id Attachment ID.
+	 * @return string
+	 */
+	private function rate_limit_key( $attachment_id ) {
+		$ip = $this->get_client_ip();
+
+		if ( false !== filter_var( $ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6 ) ) {
+			$packed = inet_pton( $ip );
+			if ( false !== $packed ) {
+				// IPv4-mapped sockets must not group every IPv4 visitor together.
+				$ip = str_repeat( "\0", 10 ) . "\xff\xff" === substr( $packed, 0, 12 )
+					? inet_ntop( substr( $packed, 12 ) )
+					: inet_ntop( substr( $packed, 0, 8 ) . str_repeat( "\0", 8 ) ) . '/64';
+			}
+		}
+
+		return 'protect_uploads_rl_' . md5( absint( $attachment_id ) . '|' . $ip );
+	}
+
+	/**
 	 * Log failed password attempt
 	 *
 	 * @since    0.5.2
@@ -342,16 +465,6 @@ class Alti_ProtectUploads_Passwords {
 	 */
 	private function log_failed_attempt( $attachment_id ) {
 		global $wpdb;
-
-		// Get number of recent failed attempts (no caching - needs real-time count for rate limiting)
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Custom table, real-time rate limiting
-		$attempts = $wpdb->get_var( $wpdb->prepare(
-			"SELECT COUNT(*) FROM {$wpdb->prefix}protect_uploads_access_logs
-			WHERE attachment_id = %d
-			AND access_type = 'failed'
-			AND access_time > DATE_SUB(NOW(), INTERVAL 1 HOUR)",
-			$attachment_id
-		) );
 
 		// Log the attempt
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery -- Custom table requires direct query
@@ -366,53 +479,33 @@ class Alti_ProtectUploads_Passwords {
 			),
 			array( '%d', '%d', '%s', '%s', '%s' )
 		);
-
-		// If too many attempts, maybe implement temporary lockout
-		if ( $attempts > 5 ) {
-			/* // Removed error log
-			error_log( sprintf( 
-				'Protect Uploads: Multiple failed password attempts for attachment %d from IP %s',
-				$attachment_id,
-				$this->get_client_ip()
-			) );
-			*/
-		}
 	}
 
 	/**
-	 * Get client IP address with proxy support
+	 * Get the client IP address.
+	 *
+	 * Uses REMOTE_ADDR only. Forwarding headers (CF-Connecting-IP,
+	 * X-Forwarded-For, Client-IP) are set by the client unless a trusted proxy
+	 * overwrites them, so trusting them lets anyone escape the rate limit.
+	 * Sites behind a proxy they control can use the 'protect_uploads_client_ip'
+	 * filter.
 	 *
 	 * @since    0.5.2
+	 * @since    0.8.0 Ignores forwarding headers.
 	 * @return   string
 	 */
 	private function get_client_ip() {
-		$headers = array(
-			'HTTP_CF_CONNECTING_IP',
-			'HTTP_X_REAL_IP',
-			'HTTP_CLIENT_IP',
-			'HTTP_X_FORWARDED_FOR',
-			'REMOTE_ADDR',
-		);
+		$ip = isset( $_SERVER['REMOTE_ADDR'] ) ? sanitize_text_field( wp_unslash( $_SERVER['REMOTE_ADDR'] ) ) : '';
 
-		foreach ( $headers as $header ) {
-			if ( empty( $_SERVER[ $header ] ) ) {
-				continue;
-			}
+		/**
+		 * Filters the client IP address used for rate limiting and logs.
+		 *
+		 * @since 0.8.0
+		 * @param string $ip The REMOTE_ADDR value.
+		 */
+		$ip = (string) apply_filters( 'protect_uploads_client_ip', $ip );
 
-			$raw_value = sanitize_text_field( wp_unslash( $_SERVER[ $header ] ) );
-			$candidates = ( 'HTTP_X_FORWARDED_FOR' === $header )
-				? explode( ',', $raw_value )
-				: array( $raw_value );
-
-			foreach ( $candidates as $candidate ) {
-				$candidate = trim( $candidate );
-				if ( filter_var( $candidate, FILTER_VALIDATE_IP ) ) {
-					return $candidate;
-				}
-			}
-		}
-
-		return '0.0.0.0';
+		return filter_var( $ip, FILTER_VALIDATE_IP ) ? $ip : '0.0.0.0';
 	}
 
 	/**
@@ -477,6 +570,11 @@ class Alti_ProtectUploads_Passwords {
 		$access_logs = $this->get_attachment_access_logs( $post->ID );
 		?>
 		<div class="protect-uploads-passwords" data-attachment-id="<?php echo esc_attr( $post->ID ); ?>">
+			<?php if ( ! Alti_ProtectUploads_Password_Rules::server_supports_rules() ) : ?>
+				<p class="description" style="color:#b32d2e;">
+					<?php esc_html_e( 'Your server does not read .htaccess rules (for example, Nginx), so this file is still reachable at its direct uploads URL. A password protects the links WordPress shows, not the file itself.', 'protect-uploads' ); ?>
+				</p>
+			<?php endif; ?>
 			<div class="existing-passwords">
 				<?php if ( ! empty( $passwords ) ) : ?>
 					<h4><?php esc_html_e( 'Existing Passwords', 'protect-uploads' ); ?></h4>
@@ -527,7 +625,7 @@ class Alti_ProtectUploads_Passwords {
 						<tbody>
 							<?php foreach ( $access_logs as $log ) : ?>
 								<tr>
-									<td><?php echo esc_html( wp_date( get_option( 'date_format' ) . ' ' . get_option( 'time_format' ), strtotime( $log->access_time ) ) ); ?></td>
+									<td><?php echo esc_html( mysql2date( get_option( 'date_format' ) . ' ' . get_option( 'time_format' ), get_date_from_gmt( $log->access_time ) ) ); ?></td>
 									<td><?php echo esc_html( $log->password_label ); ?></td>
 									<td><?php echo esc_html( $log->ip_address ); ?></td>
 								</tr>
@@ -633,6 +731,8 @@ class Alti_ProtectUploads_Passwords {
 		wp_cache_delete( 'protect_uploads_has_passwords_' . $attachment_id, 'protect_uploads' );
 		wp_cache_delete( 'protect_uploads_password_hashes_' . $attachment_id, 'protect_uploads' );
 
+		Alti_ProtectUploads_Password_Rules::sync();
+
 		return $result;
 	}
 
@@ -655,7 +755,7 @@ class Alti_ProtectUploads_Passwords {
 				'attachment_id' => $attachment_id,
 				'password_id'   => $password_id,
 				'ip_address'    => $this->get_client_ip(),
-				'user_agent'    => sanitize_text_field( wp_unslash( $_SERVER['HTTP_USER_AGENT'] ?? '' ) ),
+				'user_agent'    => substr( sanitize_text_field( wp_unslash( $_SERVER['HTTP_USER_AGENT'] ?? '' ) ), 0, 255 ),
 				'access_type'   => $access_type,
 			),
 			array( '%d', '%d', '%s', '%s', '%s' )

@@ -1,9 +1,9 @@
 <?php
 /**
  * Plugin Name:       Protect Uploads
- * Plugin URI:        https://wordpress.org/support/plugin/protect-uploads/
- * Description:       Protect your uploads directory. Avoid browsing of your uploads directory by adding a htaccess file or an index.php file.
- * Version:           0.7.1
+ * Plugin URI:        https://protectuploads.com
+ * Description:       Stop visitors from browsing your uploads directory, password-protect individual media files, add text watermarks to uploaded images, and discourage right-click copying.
+ * Version:           0.8.0
  * Requires at least: 5.0
  * Requires PHP:      7.4
  * Author:            alticreation
@@ -25,6 +25,9 @@ function protect_uploads_activate() {
 	$activation = new Alti_ProtectUploads_Activator();
 	$activation->run();
 
+	require_once plugin_dir_path( __FILE__ ) . 'includes/class-protect-uploads-password-rules.php';
+	Alti_ProtectUploads_Password_Rules::sync();
+
 }
 
 function protect_uploads_deactivate() {
@@ -41,5 +44,5 @@ register_deactivation_hook( __FILE__, 'protect_uploads_deactivate' );
 
 require plugin_dir_path( __FILE__ ) . 'includes/class-protect-uploads.php';
 
-$plugin = new Alti_ProtectUploads();
-$plugin->run();
+$protect_uploads_plugin = new Alti_ProtectUploads();
+$protect_uploads_plugin->run();

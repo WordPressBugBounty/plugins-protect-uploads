@@ -10,7 +10,7 @@ class Alti_ProtectUploads
 	 * @access   protected
 	 * @var      string    $version    The current version of the plugin.
 	 */
-	protected $version = '0.7.1';
+	protected $version = '0.8.0';
 	protected $plugin_name;
 	protected $loader;
 	protected $settings;
@@ -33,6 +33,7 @@ class Alti_ProtectUploads
 		require_once plugin_dir_path( dirname( __FILE__ ) ) . 'admin/class-protect-uploads-admin.php';
 		require_once plugin_dir_path( dirname( __FILE__ ) ) . 'includes/class-protect-uploads-image.php';
 		require_once plugin_dir_path( dirname( __FILE__ ) ) . 'includes/class-protect-uploads-passwords.php';
+		require_once plugin_dir_path( dirname( __FILE__ ) ) . 'includes/class-protect-uploads-password-rules.php';
 		require_once plugin_dir_path( dirname( __FILE__ ) ) . 'includes/class-protect-uploads-frontend.php';
 		require_once plugin_dir_path( dirname( __FILE__ ) ) . 'includes/class-protect-uploads-site-health.php';
 		require_once plugin_dir_path( dirname( __FILE__ ) ) . 'includes/class-protect-uploads-upsell.php';
@@ -68,6 +69,10 @@ class Alti_ProtectUploads
 		
 		$this->loader->add_filter( 'plugin_action_links_' . plugin_basename( plugin_dir_path( dirname( __FILE__ ) ) . $this->plugin_name . '.php' ), $plugin_admin, 'add_settings_link' );
 		$this->loader->add_action( 'admin_enqueue_scripts', $plugin_admin, 'enqueue_styles' );
+		$this->loader->add_action( 'admin_notices', $plugin_admin, 'render_rules_notice' );
+
+		// New year/month folders get an index.php when the method is active.
+		$this->loader->add_filter( 'wp_handle_upload', $plugin_admin, 'protect_upload_folder', 20 );
 
 		// Pro upgrade hints (upsell). Registers nothing when Pro is present.
 		$upsell = new Alti_ProtectUploads_Upsell( $this->get_plugin_name(), $this->get_version() );
@@ -95,6 +100,13 @@ class Alti_ProtectUploads
 		// Initialize password protection.
 		$frontend = new Alti_ProtectUploads_Frontend();
 		$frontend->init();
+
+		// Write the direct-URL rules for existing passwords after an update.
+		$this->loader->add_action( 'init', 'Alti_ProtectUploads_Password_Rules', 'maybe_sync_after_update' );
+
+		// These atomic counters live in the database even with Redis/Memcached,
+		// where core otherwise skips database transient cleanup.
+		$this->loader->add_action( 'delete_expired_transients', 'Alti_ProtectUploads_Passwords', 'cleanup_expired_attempts' );
 
 		// Add right-click protection if enabled.
 		if ( ! empty( $this->settings['enable_right_click_protection'] ) ) {
@@ -139,7 +151,9 @@ class Alti_ProtectUploads
 						'delete' => __( 'Delete', 'protect-uploads' ),
 						'existingPasswords' => __( 'Existing Passwords', 'protect-uploads' ),
 						'enterBothFields' => __( 'Please enter both a label and a password.', 'protect-uploads' ),
-						'addPassword' => __( 'Add Password', 'protect-uploads' )
+						'addPassword' => __( 'Add Password', 'protect-uploads' ),
+						'addError' => __( 'Error adding password.', 'protect-uploads' ),
+						'deleteError' => __( 'Error deleting password.', 'protect-uploads' ),
 					)
 				)
 			);
@@ -170,23 +184,5 @@ class Alti_ProtectUploads
 	public function get_version()
 	{
 		return $this->version;
-	}
-
-	/**
-	 * Get default settings
-	 *
-	 * @since    0.5.2
-	 * @return   array    Default settings.
-	 */
-	private function get_default_settings() {
-		return array(
-			'enable_watermark'     => false,
-			'watermark_text'       => get_bloginfo( 'name' ),
-			'watermark_position'   => 'bottom-right',
-			'watermark_opacity'    => 50,
-			'watermark_font_size'  => 'medium',
-			'enable_right_click'   => false,
-			'enable_password'      => false,
-		);
 	}
 }
